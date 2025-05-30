@@ -1,10 +1,9 @@
-import requests, json, os, time, pickle, re
+import requests, time, pickle, re, os
+
+import pihole_api
 
 
 ### CONSTANTS ###
-URL = "http://your.pihole.ip.here/api/"
-PASSWORD = {"password": "pihole"}
-SESSION_FILE = "session.json"
 DOMAINS_FILE = "checked_domains.pkl"
 BLOCKED_IDS = {
     "3":"Ads",
@@ -49,45 +48,6 @@ ALLOWED_IDS = {
     }
 #################
 
-### START Persistent Session Functions ###
-
-def get_sid():
-    session_data = load_session()
-
-    if is_session_valid(session_data):
-        return session_data["sid"]
-    
-    #login
-    response = requests.post(URL + "auth", json=PASSWORD, verify=False)
-
-    data = response.json()
-    sid = data.get("session", {}).get("sid")
-    validity = data.get("session", {}).get("validity", 1800)
-    if sid:
-        save_session(sid, validity)
-        return sid
-    else:
-        raise Exception("Failed to get SID")
-
-def is_session_valid(session_data):
-    return session_data and time.time() < session_data["expires_at"]
-
-def load_session():
-    if not os.path.exists(SESSION_FILE):
-        return None
-    with open(SESSION_FILE, "r") as f:
-        return json.load(f)
-    
-def save_session(sid, validity):
-    session_data = {
-        "sid" : sid,
-        "expires_at": time.time() + validity
-    }
-    with open(SESSION_FILE, "w") as f:
-        json.dump(session_data, f)
-
-### END Persistent Session Functions ###
-
 ### START Caching already checked domains ###
 
 def load_checked_domains():
@@ -104,7 +64,7 @@ def save_checked_domains(checked_domains):
 
 ### START Pi-Hole API Functions ###
 def add_blocked_domain(domains:list[str], comment:str):
-    sid = get_sid()
+    sid = pihole_api.get_sid()
     headers = {"X-FTL-SID": sid}
 
     payload = {
@@ -113,12 +73,12 @@ def add_blocked_domain(domains:list[str], comment:str):
         "enabled":True
     }
 
-    response = requests.post(URL+"domains/deny/regex", json=payload, headers=headers, verify=False)
+    response = requests.post(pihole_api.URL+"domains/deny/regex", json=payload, headers=headers, verify=False)
     return response.json()
 
 
 def get_allowed_domains(from_time=None,until_time=None):
-    sid = get_sid()
+    sid = pihole_api.get_sid()
     headers = {"X-FTL-SID": sid}
 
     if from_time is None:
@@ -132,7 +92,7 @@ def get_allowed_domains(from_time=None,until_time=None):
         "length":-1,
     }
 
-    response = requests.get(URL+"queries", params=payload, headers=headers, verify=False)
+    response = requests.get(pihole_api.URL+"queries", params=payload, headers=headers, verify=False)
     data = response.json()
 
     allowed_domains = []
@@ -161,14 +121,15 @@ def check_domain_type(domain:str):
 
     category_id = str(data.get("data", {}).get("category", {}).get("id"))
 
+    already_checked_domains.add(domain)
     
     if category_id in BLOCKED_IDS:
         return rf"(.+\.|^){re.escape(domain)}$", BLOCKED_IDS[category_id]
     
     category_label = ALLOWED_IDS.get(category_id, "Unknown")
 
-    if category_label != "Unknown":
-        already_checked_domains.add(domain) #Does not cache unknown domains
+    if category_label == "Unknown":
+        already_checked_domains.remove(domain) #Does not cache unknown domains
     
     print(f"{domain} is {category_label}")
     
@@ -185,9 +146,23 @@ def process_domains(domains: list[str]):
     
     # Push to Pi-hole API
     for category, domains in categorized_blocklist.items():
-        print(f"[+] Blocking {len(domains)} domains under category: {category}")
-        response = add_blocked_domain(domains, comment=f"Auto-blocked: {category}")
-        print(f"[API] Response: {response}")
+        print(f"[...] Blocking {len(domains)} domains under category: {category}")
+        response:dict = add_blocked_domain(domains, comment=f"Auto-blocked: {category}")
+        errors = response.get("processed", {}).get("errors", [])
+        successes = response.get("processed", {}).get("success", [])
+        print()
+        if len(successes) > 0:
+            print("#"*5," Success ","#"*5)
+            for success in successes:
+                print(f"[+] {success["item"]}")
+            print()
+
+        if len(errors) > 0:
+            print("-"*5," Errors ","-"*5)
+            for error in errors:
+                print(f"[!] {error["item"]}: {error["error"]}")
+            print()
+
 
     # Save the updated domain cache
     save_checked_domains(already_checked_domains)
