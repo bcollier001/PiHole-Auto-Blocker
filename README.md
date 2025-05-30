@@ -34,10 +34,10 @@ This Python script enhances your [Pi-hole](https://pi-hole.net/) setup by automa
 
 2. **Configure**:
 
-   Open `main.py` and update:
+   Open `pihole_api.py` and update:
 
    ```python
-   URL = "http://your.pihole.address/api/"
+   URL = "http://your.pihole.address.here/api/"
    PASSWORD = {"password": "your_pihole_password"}
    ```
 
@@ -82,8 +82,12 @@ Category IDs are based on the Netify API schema.
 ```
 [*] Fetching domains from Pi-hole...
 tracking.example.com is Ads
-[+] Blocking 1 domains under category: Ads
-[API] Response: {'success': True}
+[...] Blocking 8 domains under category: Ads
+
+#####  Success  #####
+[+] (.+\.|^)6sc\.co$
+[+] (.+\.|^)akstat\.io$
+[+] (.+\.|^)company\-target\.com$
 [✓] Sleeping for 60 seconds...
 ```
 
