@@ -88,7 +88,7 @@ tracking.example.com is Ads
 [+] (.+\.|^)6sc\.co$
 [+] (.+\.|^)akstat\.io$
 [+] (.+\.|^)company\-target\.com$
-[✓] Sleeping for 60 seconds...
+[✓] Sleeping for 59 minutes...
 ```
 
 ---
