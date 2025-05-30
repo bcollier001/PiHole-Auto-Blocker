@@ -82,7 +82,7 @@ Category IDs are based on the Netify API schema.
 ```
 [*] Fetching domains from Pi-hole...
 tracking.example.com is Ads
-[...] Blocking 8 domains under category: Ads
+[*] Blocking 3 domains under category: Ads
 
 #####  Success  #####
 [+] (.+\.|^)6sc\.co$
