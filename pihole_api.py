@@ -1,8 +1,12 @@
 import requests, json, os, time
 
-URL = "http://your.pihole.ip.here/api/"
-PASSWORD = {"password": "pihole"}
+URL = os.getenv("PIHOLE_URL", "http://your.pihole.ip.here/api/")
+PASSWORD = {"password": os.getenv("PIHOLE_PASSWORD")}
 SESSION_FILE = "session.json"
+
+# Validate requred environment variables
+if not os.getenv("PIHOLE_PASSWORD"):
+    raise ValueError("PIHOLE_PASSWORD environment variable is required")
 
 ### START Persistent Session Functions ###
 
