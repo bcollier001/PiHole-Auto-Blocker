@@ -4,7 +4,6 @@ Pi-hole Domain Categorizer & Auto-Blocker
 This module automatically analyzes allowed domains using the Netify Informatics API
 and blocks domains in undesired categories via Pi-hole's regex deny list.
 """
-import json
 import os
 import pickle
 import re
@@ -123,14 +122,14 @@ def get_allowed_domains(from_time=None, until_time=None):
     )
     data = response.json()
 
-    allowed_domains = []
+    domain_list = []
 
     for query in data.get("queries", []):
         if query["status"] != "GRAVITY":
             domain = ".".join(str(query["domain"]).split(".")[-2:]).lower()
-            allowed_domains.append(domain)
+            domain_list.append(domain)
 
-    return allowed_domains
+    return domain_list
 
 ### END Pi-Hole API Functions ###
 
