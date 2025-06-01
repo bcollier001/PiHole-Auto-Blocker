@@ -1,0 +1,26 @@
+[Unit]
+Description=Pi-hole Auto Blocker Service
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/PiHoleBlocker/
+ExecStart=/usr/bin/python3 /home/pi/PiHoleBlocker/main.py
+EnvironmentFile=/home/pi/PiHoleBlocker/.env
+Restart=always
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/home/pi/PiHoleBlocker/
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
