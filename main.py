@@ -117,7 +117,8 @@ def get_allowed_domains(from_time, until_time):
         if query.get("status") not in ALLOWED_STATUSES:
             continue
         domain = EXTRACT(str(query.get("domain", "")).lower()).top_domain_under_public_suffix
-        if domain and DOMAIN_RE.match(domain):
+        # Skip reverse DNS lookups (e.g. 192.in-addr.arpa), Netify can't categorize them
+        if domain and DOMAIN_RE.match(domain) and not domain.endswith(".arpa"):
             domain_list.append(domain)
 
     return domain_list
@@ -134,6 +135,9 @@ def check_domain_type(domain: str):
     try:
         url = f"https://informatics.netify.ai/api/v2/lookup/domains/{domain}"
         response = requests.get(url, timeout=30)
+        if response.status_code == 404:  # Not categorized yet, re-checked next run
+            print(f"{domain} is not in Netify")
+            return None
         response.raise_for_status()
         data = response.json()
     except (requests.RequestException, ValueError) as e:
