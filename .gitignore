@@ -1,1 +1,7 @@
-.env.example
+.env
+session.json
+checked_domains.json
+checked_domains.json.tmp
+checked_domains.pkl
+__pycache__/
+.venv/
