@@ -4,18 +4,28 @@ Pi-hole Domain Categorizer & Auto-Blocker
 This module automatically analyzes allowed domains using the Netify Informatics API
 and blocks domains in undesired categories via Pi-hole's regex deny list.
 """
+import json
 import os
-import pickle
 import re
 import time
 
 import requests
+import tldextract
 
 import pihole_api
 
 
 ### CONSTANTS ###
-DOMAINS_FILE = "checked_domains.pkl"
+DOMAINS_FILE = "checked_domains.json"
+SLEEP_SECONDS = 3540
+# Pi-hole query statuses that mean the query was answered (not blocked)
+ALLOWED_STATUSES = {"FORWARDED", "CACHE", "CACHE_STALE", "RETRIED", "RETRIED_DNSSEC"}
+DOMAIN_RE = re.compile(r"^(?=.{1,253}$)([a-z0-9_-]{1,63}\.)+[a-z0-9-]{2,63}$")
+# Uses the bundled Public Suffix List (no network, no cache dir), so
+# "ads.bbc.co.uk" -> "bbc.co.uk" and "foo.github.io" stays "foo.github.io"
+EXTRACT = tldextract.TLDExtract(
+    suffix_list_urls=(), cache_dir=None, include_psl_private_domains=True
+)
 BLOCKED_IDS = {
     "3":"Ads",
     "16":"Malware"
@@ -58,75 +68,56 @@ ALLOWED_IDS = {
     "37": "ISP/Telco"
     }
 #################
+#################
 
 ### START Caching already checked domains ###
 
 def load_checked_domains():
-    """Load previously checked domains from pickle file."""
+    """Load previously checked domains from the JSON cache file."""
     if os.path.exists(DOMAINS_FILE):
-        with open(DOMAINS_FILE, "rb") as f:
-            return pickle.load(f)
+        try:
+            with open(DOMAINS_FILE, "r", encoding="utf-8") as f:
+                return set(json.load(f))
+        except (OSError, ValueError) as e:
+            print(f"[!] Could not read {DOMAINS_FILE}, starting fresh: {e}")
     return set()
 
 def save_checked_domains(checked_domains):
-    """Save checked domains to pickle file."""
-    with open(DOMAINS_FILE, "wb") as f:
-        pickle.dump(checked_domains, f)
+    """Save checked domains to the JSON cache file (atomically)."""
+    tmp_file = DOMAINS_FILE + ".tmp"
+    with open(tmp_file, "w", encoding="utf-8") as f:
+        json.dump(sorted(checked_domains), f, indent=0)
+    os.replace(tmp_file, DOMAINS_FILE)
 
 ### END Caching already checked domains ###
 
 ### START Pi-Hole API Functions ###
 def add_blocked_domain(domain_list: list[str], comment: str):
     """Add domains to Pi-hole's regex deny list."""
-    sid = pihole_api.get_sid()
-    headers = {"X-FTL-SID": sid}
-
     payload = {
         "domain": domain_list,
         "comment": comment,
         "enabled": True
     }
-
-    response = requests.post(
-        pihole_api.URL + "domains/deny/regex",
-        json=payload,
-        headers=headers,
-        verify=False,
-        timeout=30
-    )
-    return response.json()
+    return pihole_api.api_request("POST", "domains/deny/regex", json=payload)
 
 
-def get_allowed_domains(from_time=None, until_time=None):
-    """Get allowed domains from Pi-hole query log."""
-    sid = pihole_api.get_sid()
-    headers = {"X-FTL-SID": sid}
-
-    if from_time is None:
-        from_time = int(time.time() - 3600)
-    if until_time is None:
-        until_time = int(time.time())
-
+def get_allowed_domains(from_time, until_time):
+    """Get registrable domains of allowed queries from the Pi-hole query log."""
     payload = {
         "from": from_time,
         "until": until_time,
         "length": -1,
     }
-
-    response = requests.get(
-        pihole_api.URL + "queries",
-        params=payload,
-        headers=headers,
-        verify=False,
-        timeout=30
-    )
-    data = response.json()
+    data = pihole_api.api_request("GET", "queries", params=payload)
 
     domain_list = []
 
     for query in data.get("queries", []):
-        if query["status"] != "GRAVITY":
-            domain = ".".join(str(query["domain"]).split(".")[-2:]).lower()
+        if query.get("status") not in ALLOWED_STATUSES:
+            continue
+        domain = EXTRACT(str(query.get("domain", "")).lower()).top_domain_under_public_suffix
+        if domain and DOMAIN_RE.match(domain):
             domain_list.append(domain)
 
     return domain_list
@@ -143,22 +134,23 @@ def check_domain_type(domain: str):
     try:
         url = f"https://informatics.netify.ai/api/v2/lookup/domains/{domain}"
         response = requests.get(url, timeout=30)
+        response.raise_for_status()
         data = response.json()
-    except requests.RequestException as e:
+    except (requests.RequestException, ValueError) as e:
         print(f"[!] Failed to fetch category for domain {domain}: {e}")
         return None
 
-    category_id = str(data.get("data", {}).get("category", {}).get("id"))
-
-    already_checked_domains.add(domain)
+    category = (data.get("data") or {}).get("category") or {}
+    category_id = str(category.get("id"))
 
     if category_id in BLOCKED_IDS:
+        # Cached only after Pi-hole accepts the block (see process_domains)
         return rf"(.+\.|^){re.escape(domain)}$", BLOCKED_IDS[category_id]
 
     category_label = ALLOWED_IDS.get(category_id, "Unknown")
 
-    if category_label == "Unknown":
-        already_checked_domains.remove(domain)  # Does not cache unknown domains
+    if category_label != "Unknown":  # Does not cache unknown domains
+        already_checked_domains.add(domain)
 
     print(f"{domain} is {category_label}")
 
@@ -172,13 +164,21 @@ def process_domains(domain_list: list[str]):
     for domain in sorted(set(domain_list)):
         result = check_domain_type(domain)
         if result:
-            domain_name, category = result
-            categorized_blocklist.setdefault(category, []).append(domain_name)
+            regex, category = result
+            categorized_blocklist.setdefault(category, []).append((domain, regex))
 
     # Push to Pi-hole API
-    for category, domains_to_block in categorized_blocklist.items():
-        print(f"[...] Blocking {len(domains_to_block)} domains under category: {category}")
-        response: dict = add_blocked_domain(domains_to_block, comment=f"Auto-blocked: {category}")
+    for category, entries in categorized_blocklist.items():
+        print(f"[...] Blocking {len(entries)} domains under category: {category}")
+        try:
+            response: dict = add_blocked_domain(
+                [regex for _, regex in entries], comment=f"Auto-blocked: {category}"
+            )
+        except (requests.RequestException, ValueError) as e:
+            print(f"[!] Failed to push {category} domains to Pi-hole, will retry next run: {e}")
+            continue
+
+        already_checked_domains.update(domain for domain, _ in entries)
         errors = response.get("processed", {}).get("errors", [])
         successes = response.get("processed", {}).get("success", [])
         print()
@@ -197,9 +197,22 @@ def process_domains(domain_list: list[str]):
     # Save the updated domain cache
     save_checked_domains(already_checked_domains)
 
-while True:
-    print("[*] Fetching domains from Pi-hole...")
-    allowed_domains = get_allowed_domains()
-    process_domains(allowed_domains)
-    print("[✓] Sleeping for 59 Minutes...")
-    time.sleep(3540)
+
+def main():
+    """Poll Pi-hole forever, picking up each run where the last one ended."""
+    last_until = int(time.time()) - 3600
+    while True:
+        until_time = int(time.time())
+        print("[*] Fetching domains from Pi-hole...")
+        try:
+            allowed_domains = get_allowed_domains(last_until, until_time)
+            process_domains(allowed_domains)
+            last_until = until_time
+        except (requests.RequestException, ValueError) as e:
+            print(f"[!] Run failed, will retry next cycle: {e}")
+        print("[✓] Sleeping for 59 Minutes...")
+        time.sleep(SLEEP_SECONDS)
+
+
+if __name__ == "__main__":
+    main()
