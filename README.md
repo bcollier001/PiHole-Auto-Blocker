@@ -54,6 +54,8 @@ This Python script enhances your [Pi-hole](https://pi-hole.net/) (v6+) setup by 
    PIHOLE_VERIFY_TLS=false
    ```
 
+   If your Pi-hole has no password set, leave `PIHOLE_PASSWORD=` empty and the script will skip logging in. Setting a password (`sudo pihole setpassword`) is still recommended, since without one anyone on your network can change your Pi-hole settings and read its query log.
+
    Secure the file:
    ```bash
    chmod 600 .env

@@ -9,13 +9,10 @@ import requests
 import urllib3
 
 URL = os.getenv("PIHOLE_URL", "http://your.pihole.ip.here/api/").rstrip("/") + "/"
-PASSWORD = {"password": os.getenv("PIHOLE_PASSWORD")}
+# Leave PIHOLE_PASSWORD empty if Pi-hole has no password set (no login needed)
+PASSWORD = {"password": os.getenv("PIHOLE_PASSWORD", "")}
 VERIFY_TLS = os.getenv("PIHOLE_VERIFY_TLS", "false").lower() in ("1", "true", "yes")
 SESSION_FILE = "session.json"
-
-# Validate required environment variables
-if not os.getenv("PIHOLE_PASSWORD"):
-    raise ValueError("PIHOLE_PASSWORD environment variable is required")
 
 if not VERIFY_TLS:
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -79,10 +76,11 @@ def clear_session():
 def api_request(method: str, endpoint: str, **kwargs):
     """Call the Pi-hole API, logging in again once if the session was rejected."""
     def send():
+        headers = {"X-FTL-SID": get_sid()} if PASSWORD["password"] else {}
         return requests.request(
             method,
             URL + endpoint,
-            headers={"X-FTL-SID": get_sid()},
+            headers=headers,
             verify=VERIFY_TLS,
             timeout=30,
             **kwargs
@@ -90,6 +88,8 @@ def api_request(method: str, endpoint: str, **kwargs):
 
     response = send()
     if response.status_code == 401:
+        if not PASSWORD["password"]:
+            raise ValueError("Pi-hole requires a password; set PIHOLE_PASSWORD in .env")
         clear_session()
         response = send()
     response.raise_for_status()
