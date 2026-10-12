@@ -29,23 +29,66 @@ This Python script enhances your [Pi-hole](https://pi-hole.net/) setup by automa
 1. **Install dependencies**:
 
    ```bash
-   pip install requests
+   pip install -r requirements.txt
    ```
 
-2. **Configure**:
+2. **Configure environment variables**:
 
-   Open `pihole_api.py` and update:
-
-   ```python
-   URL = "http://your.pihole.address.here/api/"
-   PASSWORD = {"password": "your_pihole_password"}
-   ```
-
-3. **Run the script**:
+   Create a `.env` file in the project directory:
 
    ```bash
-   python main.py
+   cp .env.example .env
    ```
+
+   Edit `.env` and update:
+
+   ```bash
+   PIHOLE_URL=http://your.pihole.address.here/api/
+   PIHOLE_PASSWORD=your_pihole_password
+   ```
+
+   Secure the file:
+   ```bash
+   chmod 600 .env
+   ```
+
+3. **Run manually**:
+
+   ```bash
+   # Load environment variables and run
+   source .env && python main.py
+   ```
+
+4. **Install as systemd service**:
+
+   ```bash
+   # Copy service file
+   sudo cp pihole-auto-blocker.service /etc/systemd/system/
+   
+   # Enable and start service (Enable to run at Startup)
+   sudo systemctl daemon-reload
+   sudo systemctl enable pihole-auto-blocker.service
+   sudo systemctl start pihole-auto-blocker.service
+   
+   # Check stauts
+   sudo systemctl status pihole-auto-blocker.service
+   ```
+
+## 📊 Service Management
+
+```bash
+# View logs
+sudo journalctl -u pihole-auto-blocker.service -f
+
+# Stop service
+sudo systemctl stop pihole-auto-blocker.service
+
+# Restart service
+sudo systemctl restart pihole-auto-blocker.service
+
+# Disable service
+sudo systemctl disable pihole-auto-blocker.service
+```
 
 ---
 
@@ -72,7 +115,7 @@ Category IDs are based on the Netify API schema.
 
 ## 🔐 Security Notice
 
-- Your Pi-hole password is currently stored in plaintext. For security, consider loading it from an environment variable or secrets file.
+- The `.env` file should have restricted permissions (600)
 - `verify=False` is used to skip SSL checks. Change this if you use HTTPS with valid certs.
 
 ---
