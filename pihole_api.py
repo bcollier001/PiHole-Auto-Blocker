@@ -92,5 +92,16 @@ def api_request(method: str, endpoint: str, **kwargs):
             raise ValueError("Pi-hole requires a password; set PIHOLE_PASSWORD in .env")
         clear_session()
         response = send()
+    if not response.ok:
+        # Pi-hole explains failures in {"error": {"message": ..., "hint": ...}}
+        try:
+            error = response.json().get("error") or {}
+        except ValueError:
+            error = {}
+        detail = ": ".join(filter(None, (error.get("message"), error.get("hint"))))
+        if detail:
+            raise requests.HTTPError(
+                f"{response.status_code} {response.reason}: {detail}", response=response
+            )
     response.raise_for_status()
     return response.json()

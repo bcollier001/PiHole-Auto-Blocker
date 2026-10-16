@@ -104,6 +104,12 @@ def add_blocked_domain(domain_list: list[str], comment: str):
     return pihole_api.api_request("POST", "domains/deny/regex", json=payload)
 
 
+def get_denied_regexes():
+    """Get the regexes already on Pi-hole's regex deny list."""
+    data = pihole_api.api_request("GET", "domains/deny/regex")
+    return {entry.get("domain") for entry in data.get("domains", [])}
+
+
 def get_allowed_domains(from_time, until_time):
     """Get registrable domains of allowed queries from the Pi-hole query log."""
     payload = {
@@ -163,6 +169,21 @@ def check_domain_type(domain: str):
     return None
 
 
+def skip_already_blocked(categorized_blocklist: dict):
+    """Drop regexes Pi-hole already has, it rejects duplicates (e.g. after the cache was reset)."""
+    try:
+        denied = get_denied_regexes()
+    except (requests.RequestException, ValueError) as e:
+        print(f"[!] Could not read Pi-hole's deny list: {e}")
+        return
+    for category, entries in categorized_blocklist.items():
+        for domain, regex in entries:
+            if regex in denied:
+                print(f"[=] {domain} is already blocked")
+                already_checked_domains.add(domain)
+        categorized_blocklist[category] = [e for e in entries if e[1] not in denied]
+
+
 def process_domains(domain_list: list[str]):
     """Process a list of domains and block those in unwanted categories."""
     categorized_blocklist = {}
@@ -173,8 +194,13 @@ def process_domains(domain_list: list[str]):
             regex, category = result
             categorized_blocklist.setdefault(category, []).append((domain, regex))
 
+    if categorized_blocklist:
+        skip_already_blocked(categorized_blocklist)
+
     # Push to Pi-hole API
     for category, entries in categorized_blocklist.items():
+        if not entries:
+            continue
         print(f"[...] Blocking {len(entries)} domains under category: {category}")
         try:
             response: dict = add_blocked_domain(
