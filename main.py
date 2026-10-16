@@ -6,6 +6,7 @@ and blocks domains in undesired categories via Pi-hole's regex deny list.
 """
 import json
 import os
+import random
 import re
 import time
 
@@ -17,6 +18,11 @@ import pihole_api
 
 ### CONSTANTS ###
 DOMAINS_FILE = "checked_domains.json"
+# Categorized domains are re-checked monthly in case Netify reclassifies them
+CACHE_SECONDS = 30 * 24 * 3600
+# Domains Netify doesn't know yet are retried daily instead of every run
+RETRY_SECONDS = 24 * 3600
+RETRY_CATEGORIES = {"Not in Netify", "Unknown"}
 SLEEP_SECONDS = 3540
 # Pi-hole query statuses that mean the query was answered (not blocked)
 ALLOWED_STATUSES = {"FORWARDED", "CACHE", "CACHE_STALE", "RETRIED", "RETRIED_DNSSEC"}
@@ -79,17 +85,44 @@ def load_checked_domains():
     if os.path.exists(DOMAINS_FILE):
         try:
             with open(DOMAINS_FILE, "r", encoding="utf-8") as f:
-                return set(json.load(f))
+                data = json.load(f)
         except (OSError, ValueError) as e:
             print(f"[!] Could not read {DOMAINS_FILE}, starting fresh: {e}")
-    return set()
+            return {}
+        if isinstance(data, list):
+            # Old format (plain list of domains). Spread their check times over
+            # the last CACHE_SECONDS so they don't all expire on the same day.
+            now = time.time()
+            return {
+                domain: {"category": None, "checked": int(now - random.uniform(0, CACHE_SECONDS))}
+                for domain in data
+            }
+        return data
+    return {}
 
-def save_checked_domains(checked_domains):
-    """Save checked domains to the JSON cache file (atomically)."""
+def save_checked_domains(checked_domains: dict):
+    """Drop expired entries and save the rest to the JSON cache file (atomically)."""
+    now = time.time()
+    for domain in [d for d, entry in checked_domains.items() if not is_fresh(entry, now)]:
+        del checked_domains[domain]
     tmp_file = DOMAINS_FILE + ".tmp"
     with open(tmp_file, "w", encoding="utf-8") as f:
-        json.dump(sorted(checked_domains), f, indent=0)
+        json.dump(checked_domains, f, indent=1, sort_keys=True)
     os.replace(tmp_file, DOMAINS_FILE)
+
+def is_fresh(entry: dict, now: float):
+    """True while a cache entry is younger than the TTL for its category."""
+    ttl = RETRY_SECONDS if entry.get("category") in RETRY_CATEGORIES else CACHE_SECONDS
+    return now < entry.get("checked", 0) + ttl
+
+def is_cached(domain: str):
+    """True if the domain was checked recently enough to skip Netify."""
+    entry = already_checked_domains.get(domain)
+    return entry is not None and is_fresh(entry, time.time())
+
+def mark_checked(domain: str, category: str):
+    """Record the domain's category and when it was checked."""
+    already_checked_domains[domain] = {"category": category, "checked": int(time.time())}
 
 ### END Caching already checked domains ###
 
@@ -137,18 +170,19 @@ already_checked_domains = load_checked_domains()
 
 def check_domain_type(domain: str):
     """Check domain category using Netify API and return regex if should be blocked."""
-    if domain in already_checked_domains:
+    if is_cached(domain):
         return None
 
     try:
         url = f"https://informatics.netify.ai/api/v2/lookup/domains/{domain}"
         response = requests.get(url, timeout=30)
-        if response.status_code == 404:  # Not categorized yet, re-checked next run
+        if response.status_code == 404:  # Not categorized yet, retried after RETRY_SECONDS
             print(f"{domain} is not in Netify")
+            mark_checked(domain, "Not in Netify")
             return None
         response.raise_for_status()
         data = response.json()
-    except (requests.RequestException, ValueError) as e:
+    except (requests.RequestException, ValueError) as e:  # Not cached, retried next run
         print(f"[!] Failed to fetch category for domain {domain}: {e}")
         return None
 
@@ -160,9 +194,7 @@ def check_domain_type(domain: str):
         return rf"(.+\.|^){re.escape(domain)}$", BLOCKED_IDS[category_id]
 
     category_label = ALLOWED_IDS.get(category_id, "Unknown")
-
-    if category_label != "Unknown":  # Does not cache unknown domains
-        already_checked_domains.add(domain)
+    mark_checked(domain, category_label)
 
     print(f"{domain} is {category_label}")
 
@@ -180,7 +212,7 @@ def skip_already_blocked(categorized_blocklist: dict):
         for domain, regex in entries:
             if regex in denied:
                 print(f"[=] {domain} is already blocked")
-                already_checked_domains.add(domain)
+                mark_checked(domain, category)
         categorized_blocklist[category] = [e for e in entries if e[1] not in denied]
 
 
@@ -210,7 +242,8 @@ def process_domains(domain_list: list[str]):
             print(f"[!] Failed to push {category} domains to Pi-hole, will retry next run: {e}")
             continue
 
-        already_checked_domains.update(domain for domain, _ in entries)
+        for domain, _ in entries:
+            mark_checked(domain, category)
         errors = response.get("processed", {}).get("errors", [])
         successes = response.get("processed", {}).get("success", [])
         print()

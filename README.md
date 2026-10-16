@@ -10,8 +10,8 @@ This Python script enhances your [Pi-hole](https://pi-hole.net/) (v6+) setup by 
 - 🔍 **Domain Categorization**: Uses Netify to determine each domain's category.
 - 🛡️ **Auto-blocking**: Automatically regex-blocks domains identified as Ads or Malware.
 - 🌐 **Public Suffix aware**: Domains are reduced to their registrable domain using the ICANN section of the Public Suffix List (`ads.bbc.co.uk` → `bbc.co.uk`, `my-app-xyz.a.run.app` → `run.app`), so a whole TLD like `co.uk` can never be blocked by mistake.
-- 🧠 **Duplicate Filtering**: Avoids re-checking previously scanned domains. Blocked domains are only cached once Pi-hole has accepted them, so failed pushes are retried.
-- 💾 **Persistent Caching**: Saves checked domains in `checked_domains.json` for reuse across runs.
+- 🧠 **Duplicate Filtering**: Avoids re-checking recently scanned domains. Blocked domains are only cached once Pi-hole has accepted them, so failed pushes are retried.
+- 💾 **Persistent Caching with expiry**: Saves each checked domain's category and check time in `checked_domains.json`. Categorized domains are re-checked after 30 days (in case Netify reclassifies them), domains Netify doesn't know yet are retried daily, and network errors are retried next run. Expired entries are pruned, so the file only holds recently seen domains.
 - 🔐 **Session Persistence**: Reuses Pi-hole session tokens and logs in again automatically if a session expires early.
 - 🩹 **Resilient**: Network errors are logged and retried on the next cycle instead of crashing the service.
 
@@ -22,9 +22,9 @@ This Python script enhances your [Pi-hole](https://pi-hole.net/) (v6+) setup by 
 - `main.py` – The core script.
 - `pihole_api.py` – Pi-hole authentication and API helper.
 - `session.json` – Stores your Pi-hole session token and expiration (created with `600` permissions).
-- `checked_domains.json` – Tracks domains already processed.
+- `checked_domains.json` – Tracks domains already processed, e.g. `{"run.app": {"category": "Hosting", "checked": 1760600000}}`.
 
-> Upgrading from an older version? The old `checked_domains.pkl` cache is no longer read and can be deleted. Domains will simply be re-checked once.
+> Upgrading from an older version? The old `checked_domains.pkl` cache is no longer read and can be deleted. Domains will simply be re-checked once. An older `checked_domains.json` (a plain list) is converted automatically, with its re-checks spread over the following 30 days.
 
 ---
 
@@ -124,6 +124,8 @@ ALLOWED_IDS = {
 ```
 
 Category IDs are based on the Netify API schema.
+
+How long results are cached is set by `CACHE_SECONDS` (categorized domains, default 30 days) and `RETRY_SECONDS` (domains not in Netify yet, default 1 day) in `main.py`.
 
 ---
 
