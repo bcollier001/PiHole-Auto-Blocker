@@ -21,10 +21,12 @@ SLEEP_SECONDS = 3540
 # Pi-hole query statuses that mean the query was answered (not blocked)
 ALLOWED_STATUSES = {"FORWARDED", "CACHE", "CACHE_STALE", "RETRIED", "RETRIED_DNSSEC"}
 DOMAIN_RE = re.compile(r"^(?=.{1,253}$)([a-z0-9_-]{1,63}\.)+[a-z0-9-]{2,63}$")
-# Uses the bundled Public Suffix List (no network, no cache dir), so
-# "ads.bbc.co.uk" -> "bbc.co.uk" and "foo.github.io" stays "foo.github.io"
+# Uses the bundled Public Suffix List (no network, no cache dir), ICANN
+# suffixes only, so "ads.bbc.co.uk" -> "bbc.co.uk" and
+# "x.a.run.app" -> "run.app". Private entries (e.g. "a.run.app",
+# "github.io") are ignored, as Netify only knows the registrable domain.
 EXTRACT = tldextract.TLDExtract(
-    suffix_list_urls=(), cache_dir=None, include_psl_private_domains=True
+    suffix_list_urls=(), cache_dir=None, include_psl_private_domains=False
 )
 BLOCKED_IDS = {
     "3":"Ads",

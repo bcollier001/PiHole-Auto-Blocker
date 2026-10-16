@@ -9,7 +9,7 @@ This Python script enhances your [Pi-hole](https://pi-hole.net/) (v6+) setup by 
 - 🔁 **Continuous Monitoring**: Polls Pi-hole's query log roughly every hour, picking up where the previous run ended so no queries are missed.
 - 🔍 **Domain Categorization**: Uses Netify to determine each domain's category.
 - 🛡️ **Auto-blocking**: Automatically regex-blocks domains identified as Ads or Malware.
-- 🌐 **Public Suffix aware**: Domains are reduced to their registrable domain using the Public Suffix List (`ads.bbc.co.uk` → `bbc.co.uk`, `foo.github.io` stays `foo.github.io`), so a whole TLD like `co.uk` can never be blocked by mistake.
+- 🌐 **Public Suffix aware**: Domains are reduced to their registrable domain using the ICANN section of the Public Suffix List (`ads.bbc.co.uk` → `bbc.co.uk`, `my-app-xyz.a.run.app` → `run.app`), so a whole TLD like `co.uk` can never be blocked by mistake.
 - 🧠 **Duplicate Filtering**: Avoids re-checking previously scanned domains. Blocked domains are only cached once Pi-hole has accepted them, so failed pushes are retried.
 - 💾 **Persistent Caching**: Saves checked domains in `checked_domains.json` for reuse across runs.
 - 🔐 **Session Persistence**: Reuses Pi-hole session tokens and logs in again automatically if a session expires early.
